@@ -62,6 +62,7 @@ class ProductionConfig(Config):
     """Production configuration."""
     DEBUG = False
     TESTING = False
+    SESSION_COOKIE_SECURE = True
     # In production, ensure SECRET_KEY and DATABASE_URI come from environment
     SECRET_KEY = os.environ.get('SECRET_KEY', 'prod-key-must-be-set')
 
