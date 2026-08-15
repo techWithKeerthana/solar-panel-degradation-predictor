@@ -7,3 +7,4 @@ instance/
 uploads/
 .DS_Store
 Thumbs.db
+models/random_forest.joblib

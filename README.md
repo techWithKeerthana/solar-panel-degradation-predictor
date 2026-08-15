@@ -355,3 +355,40 @@ Open **http://localhost:5000/register** in your browser and follow this flow:
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full component-to-layer mapping
 and an explicit list of anything from Fig 6.2 that was not implemented.
 
+---
+
+## 9. Deployment (Render)
+
+### Production server
+
+Do **not** use the Flask development server (`python run.py`) in production.
+Render should run this app with Gunicorn:
+
+```bash
+gunicorn "app.app:create_app('production')" --bind 0.0.0.0:$PORT
+```
+
+This uses the application factory directly in production mode.
+
+### Environment variables on Render
+
+Set these in the Render dashboard (do not commit secrets to git):
+
+- `SECRET_KEY` = strong random secret
+- `FLASK_ENV` = `production`
+- `DATABASE_URL` = optional override (if omitted, defaults to `sqlite:///app.db`)
+
+### Free-tier storage limitation (important)
+
+On Render's free tier, the service filesystem is **ephemeral**.
+That means files created at runtime are not durable across redeploys/restarts.
+
+Implications for the current app:
+
+- `instance/app.db` (SQLite live database) can reset after redeploy/restart.
+- `uploads/` content can reset after redeploy/restart.
+- User accounts and prediction history are not guaranteed to persist long-term.
+
+For durable persistence, migrate the app database to Render Postgres (or another
+persistent external database) and move uploads to persistent object storage.
+

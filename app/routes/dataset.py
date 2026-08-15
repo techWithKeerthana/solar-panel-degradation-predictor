@@ -24,6 +24,7 @@ from app.utils.maintenance_rules import get_maintenance_recommendation
 dataset_bp = Blueprint('dataset', __name__)
 
 ALLOWED_EXTENSIONS = {'csv'}
+RAW_CATEGORICAL_COLUMNS = {'error_code', 'installation_type', 'string_id'}
 
 
 def _allowed_file(filename):
@@ -71,14 +72,34 @@ def upload():
         # Run cleaning pipeline + batch predictions
         try:
             from ml.preprocessing import clean_and_encode_dataset
-            from ml.predict import predict_batch
+            from ml.predict import predict_batch, _load_feature_columns
 
-            df_cleaned = clean_and_encode_dataset(str(save_path))
+            uploaded_df = pd.read_csv(str(save_path))
+            feature_columns = _load_feature_columns()
+
+            # Accept both raw CSVs (same shape as train.csv) and already-cleaned
+            # model-ready CSVs (same shape as train_cleaned.csv).
+            if RAW_CATEGORICAL_COLUMNS.intersection(uploaded_df.columns):
+                df_cleaned = clean_and_encode_dataset(str(save_path))
+            else:
+                df_cleaned = uploaded_df.copy()
+
             row_count = len(df_cleaned)
 
             # Drop target if accidentally present in upload
             if 'efficiency' in df_cleaned.columns:
                 df_cleaned = df_cleaned.drop(columns=['efficiency'])
+
+            missing_feature_columns = [
+                column for column in feature_columns
+                if column not in df_cleaned.columns
+            ]
+            if missing_feature_columns:
+                missing_preview = ', '.join(missing_feature_columns[:5])
+                raise ValueError(
+                    'Uploaded CSV schema is not compatible with the trained model. '
+                    f'Missing columns include: {missing_preview}'
+                )
 
             # Batch predict
             preds = predict_batch(df_cleaned)

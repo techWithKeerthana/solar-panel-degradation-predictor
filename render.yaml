@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: solar-panel-degradation-predictor
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn "app.app:create_app('production')" --bind 0.0.0.0:$PORT
+    envVars:
+      - key: SECRET_KEY
+        sync: false
+      - key: FLASK_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
