@@ -7,12 +7,17 @@ Routes:
   GET /logout — logout and redirect
 """
 
+import re
+
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_user, logout_user, login_required, current_user
 from app.models_db import db, User
 
 
 auth_bp = Blueprint('auth', __name__)
+
+# Basic email shape check: something@something.tld (not a full RFC 5322 validator)
+EMAIL_PATTERN = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 
 @auth_bp.route('/register', methods=['GET', 'POST'])
@@ -36,6 +41,7 @@ def register():
     
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
+        email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '').strip()
         password_confirm = request.form.get('password_confirm', '').strip()
         
@@ -43,6 +49,10 @@ def register():
         errors = []
         if not username:
             errors.append('Username is required.')
+        if not email:
+            errors.append('Email is required.')
+        elif not EMAIL_PATTERN.match(email):
+            errors.append('Email address is not a valid format.')
         if not password:
             errors.append('Password is required.')
         if password != password_confirm:
@@ -54,13 +64,17 @@ def register():
         if User.query.filter_by(username=username).first():
             errors.append(f'Username "{username}" is already taken.')
         
+        # Check if email already exists
+        if email and User.query.filter_by(email=email).first():
+            errors.append(f'Email "{email}" is already registered.')
+        
         if errors:
             for error in errors:
                 flash(error, 'error')
             return redirect(url_for('auth.register'))
         
         # Create new user
-        user = User(username=username)
+        user = User(username=username, email=email)
         user.set_password(password)  # Hash password
         
         try:
@@ -95,22 +109,24 @@ def login():
         return redirect(url_for('auth.dashboard'))
     
     if request.method == 'POST':
-        username = request.form.get('username', '').strip()
+        identifier = request.form.get('username', '').strip()
         password = request.form.get('password', '').strip()
         
         # Validate inputs
-        if not username or not password:
-            flash('Username and password are required.', 'error')
+        if not identifier or not password:
+            flash('Username/email and password are required.', 'error')
             return redirect(url_for('auth.login'))
         
-        # Look up user by username
-        user = User.query.filter_by(username=username).first()
+        # Accept either a username or an email address in the same field
+        user = User.query.filter_by(username=identifier).first()
+        if not user:
+            user = User.query.filter_by(email=identifier.lower()).first()
         
         # Verify password (check_password handles hash comparison)
         if user and user.check_password(password):
             # Success: create session
             login_user(user, remember=False)  # Set remember=True for "remember me" feature
-            flash(f'Logged in as {username}.', 'success')
+            flash(f'Logged in as {user.username}.', 'success')
             
             # Redirect to next page or dashboard
             next_page = request.args.get('next')
