@@ -350,6 +350,57 @@ Open **http://localhost:5000/register** in your browser and follow this flow:
 
 ---
 
+## Real-Time Monitoring (Simulated)
+
+The project guide's Phase-II feedback asked for "real-time data" capability. No
+physical IoT sensors are available for this academic project, so this is implemented
+as a **simulated real-time sensor feed** that behaves like genuine live monitoring
+for demo/evaluation purposes, while being clearly labeled as simulated in the UI.
+
+**What it is:**
+- A background job (`app/utils/realtime_scheduler.py` + `app/utils/sensor_simulator.py`,
+  using APScheduler) generates one plausible sensor reading per registered user every
+  ~10 seconds (configurable via `SENSOR_SIM_INTERVAL_SECONDS`).
+- Each reading is realistic, not uniform noise — every numeric feature is sampled
+  from a normal distribution using the actual mean/std observed in
+  `data/train_cleaned.csv`, clipped to that dataset's real min/max.
+- Each reading is scored through the **exact same** `ml/predict.py` inference path
+  used by the manual prediction form and CSV upload, and given a maintenance
+  recommendation through the **exact same** `app/utils/maintenance_rules.py`
+  thresholds — nothing is duplicated or redefined.
+- Results are stored in a new `SensorReading` table (`app/models_db.py`), linked to
+  the user, following the same pattern as the existing `PredictionResult` model.
+
+**Live Monitoring page:** `/live-monitor` shows a live-updating Chart.js line chart
+(last 30 readings), a "latest reading" panel (efficiency, severity, recommendation),
+and a short alert log (last 10 warning/critical readings) — all via periodic AJAX
+polling every ~5 seconds, not websockets, so it stays deployable on Render's free
+tier without extra infrastructure.
+
+**Navbar alert badge:** a small amber/red badge next to the "Live Monitoring" nav
+link is visible from every page, polled every ~18 seconds from a small isolated
+script in `base.html` (separate from the theme-toggle script, and only active for
+authenticated users). The badge clears when the user visits `/live-monitor` — this
+was the simpler of the two options considered (the alternative being an explicit
+"dismiss" control), so an explicit dismiss button was intentionally not added.
+
+**Why simulated, and how this maps to Future Scope:** the presentation's Future
+Scope slide already lists "Integrate IoT sensors for real-time data collection" and
+"Add real-time alerts for degradation and maintenance." This feature is the
+foundation for exactly that: because it consumes the same raw feature schema as the
+existing upload/predict paths, a real IoT/MQTT/HTTP ingest source could later replace
+`sensor_simulator.py`'s random generator without changing any prediction or alerting
+logic downstream of it.
+
+**Duplicate-scheduler safety:** the background job guards against starting twice —
+once for Flask's debug reloader (same pattern `run.py` already uses for its
+browser-auto-open), and once for a possible future multi-worker gunicorn deployment
+(an OS-level lock file under `instance/`, so only the first worker/process runs the
+simulator). See the comment block at the top of `app/utils/realtime_scheduler.py`
+for the full explanation.
+
+---
+
 ## 8. Phase-II Architecture — Mapping to Phase-I Fig 6.2
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full component-to-layer mapping

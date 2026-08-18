@@ -191,3 +191,45 @@ uses **SQLite** via SQLAlchemy. SQLite requires no separate server process, ship
 Python, and the `DATABASE_URL` environment variable in `.env` can be changed to a MySQL
 or PostgreSQL URL without touching any application code — SQLAlchemy abstracts the
 difference entirely.
+
+---
+
+## Real-Time Monitoring (Simulated)
+
+Added after the original Phase-II build, in response to project guide feedback asking
+for "real-time data" capability. No physical IoT sensors are available for this
+academic project, so this is a **simulated** real-time sensor feed rather than a real
+hardware integration — clearly labeled as such in the UI ("Simulated Feed" badge on
+the Live Monitoring page).
+
+| Component | Files |
+|---|---|
+| Synthetic reading generator (realistic mean/std/min/max per feature, taken from `data/train_cleaned.csv`, not uniform noise) | `app/utils/sensor_simulator.py` |
+| Background scheduling (APScheduler), with dev-reloader and cross-process/multi-worker duplicate-start guards | `app/utils/realtime_scheduler.py` |
+| Storage: one row per generated reading, same JSON `input_data` pattern as `PredictionResult`, plus `severity` and `is_read` | `SensorReading` model in `app/models_db.py` |
+| Live Monitoring page + JSON polling endpoints | `app/routes/realtime.py`, `app/templates/live_monitor.html` |
+| Navbar unread-alerts badge (system-wide, polled from every authenticated page) | `app/templates/base.html` |
+
+**No duplicated logic:** every simulated reading is scored through the same
+`ml/predict.py::predict_single()` used by the manual prediction form and CSV upload,
+and given a recommendation through the same `app/utils/maintenance_rules.py` thresholds
+used everywhere else — this feature adds no second copy of either.
+
+**Alert badge behavior (documented choice):** the badge counts unread
+warning/critical `SensorReading` rows and clears when the user visits `/live-monitor`.
+An explicit "dismiss" control was considered and intentionally not built, since
+visiting the monitoring page is the simpler mechanism and already the natural way a
+user would acknowledge new readings.
+
+**Maps directly to two items already in this project's own Future Scope slide:**
+"Integrate IoT sensors for real-time data collection" and "Add real-time alerts for
+degradation and maintenance." Because the simulator produces the identical raw
+feature schema consumed by the existing upload/predict paths, a real IoT/MQTT/HTTP
+ingest source could later replace `sensor_simulator.py`'s generator function alone,
+with no change required to the prediction, storage, or alerting logic downstream.
+
+**Deployment note:** deliberately implemented with AJAX polling (not websockets) so
+it stays compatible with the existing single-worker `gunicorn` command in
+`render.yaml` and Render's free tier, with no additional long-running worker
+processes or infrastructure.
+
