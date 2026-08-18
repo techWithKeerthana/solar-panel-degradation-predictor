@@ -40,6 +40,13 @@ class Config:
     UPLOAD_FOLDER = Path(__file__).parent.parent / 'uploads'
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max upload size
     
+    # Simulated real-time sensor feed (Live Monitoring feature).
+    # No physical IoT hardware is available for this academic project, so a
+    # background job generates plausible readings instead — see
+    # app/utils/sensor_simulator.py for the full rationale.
+    ENABLE_SENSOR_SIMULATOR = True
+    SENSOR_SIM_INTERVAL_SECONDS = int(os.environ.get('SENSOR_SIM_INTERVAL_SECONDS', 10))
+    
     @staticmethod
     def init_app(app):
         """Initialize app-specific configuration."""
@@ -56,6 +63,7 @@ class TestingConfig(Config):
     """Testing configuration."""
     TESTING = True
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'  # In-memory DB for tests
+    ENABLE_SENSOR_SIMULATOR = False  # Keep tests free of background threads
 
 
 class ProductionConfig(Config):

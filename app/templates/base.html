@@ -222,6 +222,23 @@
             transform: translateY(-1px);
         }
 
+        .alert-badge {
+            display: none;
+            min-width: 18px;
+            padding: 1px 6px;
+            margin-left: 6px;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: #fff;
+            background: var(--amber);
+            vertical-align: middle;
+        }
+
+        .alert-badge.critical {
+            background: var(--red);
+        }
+
         main {
             width: min(1200px, calc(100% - 40px));
             margin: 0 auto;
@@ -783,6 +800,7 @@
             <a href="{{ url_for('predict.predict') }}">Predict</a>
             <a href="{{ url_for('dataset.upload') }}">Upload</a>
             <a href="{{ url_for('predict.history') }}">History</a>
+            <a href="{{ url_for('realtime.live_monitor') }}">Live Monitoring<span id="alert-badge" class="alert-badge"></span></a>
             <a href="{{ url_for('auth.logout') }}">Logout</a>
         {% else %}
             <a href="{{ url_for('auth.login') }}">Login</a>
@@ -860,5 +878,37 @@
             });
         })();
     </script>
+    {% if current_user.is_authenticated %}
+    <script>
+        // Small, isolated navbar alert-badge poller. Deliberately separate from
+        // the theme-toggle script above and guarded to authenticated pages only,
+        // so pages unrelated to monitoring (and all logged-out pages) never run it.
+        (function () {
+            var POLL_INTERVAL_MS = 18000;
+            var badge = document.getElementById('alert-badge');
+            if (!badge) {
+                return;
+            }
+
+            function refresh() {
+                fetch("{{ url_for('realtime.api_unread_count') }}", { credentials: 'same-origin' })
+                    .then(function (resp) { return resp.json(); })
+                    .then(function (data) {
+                        if (!data.count) {
+                            badge.style.display = 'none';
+                            return;
+                        }
+                        badge.textContent = data.count;
+                        badge.classList.toggle('critical', data.severity === 'critical');
+                        badge.style.display = 'inline-block';
+                    })
+                    .catch(function () { /* silently retry on next tick */ });
+            }
+
+            refresh();
+            setInterval(refresh, POLL_INTERVAL_MS);
+        })();
+    </script>
+    {% endif %}
 </body>
 </html>

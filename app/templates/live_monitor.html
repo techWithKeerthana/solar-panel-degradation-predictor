@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% block title %}Live Monitoring - Solar Panel Degradation Predictor{% endblock %}
+
+{% block extra_css %}
+<style>
+/* Severity styling copied locally from results.html's rec-box/efficiency-badge
+   pattern (not shared via base.html) so this page stays self-contained and
+   results.html is left untouched. */
+.efficiency-badge {
+    font-size: 48px;
+    font-weight: 800;
+    line-height: 1;
+    margin: 10px 0;
+    letter-spacing: -0.06em;
+}
+.rec-box {
+    padding: 16px 22px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+    margin: 16px 0;
+    border-left: 5px solid;
+}
+.rec-box.critical  { background:rgba(239, 68, 68, 0.10); border-color:var(--red); color:#b42318; }
+.rec-box.warning   { background:rgba(245, 158, 11, 0.10); border-color:var(--amber); color:#b45309; }
+.rec-box.ok        { background:rgba(34, 197, 94, 0.10); border-color:var(--green); color:#15803d; }
+
+.sim-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(245, 158, 11, 0.14);
+    color: var(--amber-deep, #b45309);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    margin-left: 10px;
+    vertical-align: middle;
+}
+
+.alert-log-item {
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(219, 228, 240, 0.9);
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+}
+.alert-log-item:last-child { border-bottom: none; }
+.alert-log-time { color: var(--muted); white-space: nowrap; }
+.alert-log-sev-critical { color: var(--red); font-weight: 700; }
+.alert-log-sev-warning  { color: var(--amber-deep, #b45309); font-weight: 700; }
+
+#alert-toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 340px;
+}
+.alert-toast {
+    padding: 14px 18px;
+    border-radius: 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    box-shadow: var(--shadow-md, 0 16px 38px rgba(2, 8, 23, 0.35));
+    animation: alert-toast-in 0.25s ease-out;
+}
+.alert-toast.critical { background: var(--red); }
+.alert-toast.warning  { background: var(--amber); }
+@keyframes alert-toast-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="alert-toast-container"></div>
+<div class="container accent-blue" style="max-width: 980px;">
+
+    <div class="eyebrow">Live Monitoring<span class="sim-badge">Simulated Feed</span></div>
+    <h2>Live Panel Monitoring</h2>
+    <p class="page-intro" style="max-width: 720px;">
+        This page shows a simulated real-time sensor stream standing in for physical
+        IoT hardware, which is not available for this academic project. A background
+        job generates one plausible reading roughly every few seconds, scores it with
+        the same trained model used everywhere else in this app, and applies the same
+        maintenance rules &mdash; so this is a realistic preview of what live sensor
+        integration would look like, not a separate mock system.
+    </p>
+
+    <!-- Latest reading panel -->
+    <div class="surface-panel accent-blue" id="latest-panel" style="text-align:center; padding:24px; border-radius:24px;">
+        <p class="section-kicker" style="margin-bottom:6px; color: var(--muted);">Latest Simulated Reading</p>
+        <div class="efficiency-badge" id="latest-efficiency" style="color: var(--muted);">&mdash;</div>
+        <p class="meta-line" id="latest-timestamp" style="margin: 0;">Waiting for first reading&hellip;</p>
+        <div class="rec-box ok" id="latest-rec-box">
+            <span id="latest-recommendation">No reading yet. The simulator ticks automatically in the background.</span>
+        </div>
+    </div>
+
+    <!-- Chart + Alerts log side by side -->
+    <div class="two-column-grid">
+        <div class="chart-panel accent-blue">
+            <div class="section-kicker">Live Trend</div>
+            <p style="font-weight:600; font-size:13px; color:var(--heading); margin-bottom:14px;">Efficiency &mdash; Last 30 Readings</p>
+            <canvas id="liveChart" height="220"></canvas>
+        </div>
+
+        <div class="table-panel accent-navy">
+            <div class="section-kicker">Alert Log</div>
+            <p style="font-weight:600; font-size:13px; color:var(--heading); margin-bottom:14px;">Recent Warning / Critical Alerts</p>
+            <div id="alert-log">
+                <p class="meta-line">No alerts yet.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Chart.js from CDN (same version already used by results.html) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+    var FEED_URL = "{{ url_for('realtime.api_feed') }}";
+    var POLL_INTERVAL_MS = 5000;
+    var seenAlertIds = new Set();
+    var firstLoadDone = false;
+
+    var ctx = document.getElementById('liveChart').getContext('2d');
+    var chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Predicted Efficiency',
+                data: [],
+                borderColor: '#3B82F6',
+                backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                tension: 0.3,
+                fill: true,
+                pointRadius: 2,
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: { y: { min: 0, max: 1 } },
+            plugins: { legend: { display: false } },
+        }
+    });
+
+    function severityClass(severity) {
+        return severity === 'critical' ? 'critical' : (severity === 'warning' ? 'warning' : 'ok');
+    }
+
+    function renderLatest(latest) {
+        if (!latest) { return; }
+        var effEl = document.getElementById('latest-efficiency');
+        var tsEl = document.getElementById('latest-timestamp');
+        var recBox = document.getElementById('latest-rec-box');
+        var recText = document.getElementById('latest-recommendation');
+
+        var colorMap = { critical: '#EF4444', warning: '#F59E0B', ok: '#22C55E' };
+        var sevClass = severityClass(latest.severity);
+
+        effEl.textContent = latest.predicted_efficiency.toFixed(4);
+        effEl.style.color = colorMap[sevClass];
+        tsEl.textContent = 'Updated ' + latest.created_at;
+        recBox.className = 'rec-box ' + sevClass;
+        recText.textContent = latest.maintenance_recommendation;
+    }
+
+    function renderChart(readings) {
+        chart.data.labels = readings.map(function (r) { return r.created_at.slice(11); });
+        chart.data.datasets[0].data = readings.map(function (r) { return r.predicted_efficiency; });
+        chart.update();
+    }
+
+    function renderAlertLog(alerts) {
+        var container = document.getElementById('alert-log');
+        if (!alerts.length) {
+            container.innerHTML = '<p class="meta-line">No alerts yet.</p>';
+            return;
+        }
+        container.innerHTML = alerts.map(function (a) {
+            var sevClass = 'alert-log-sev-' + severityClass(a.severity);
+            return '<div class="alert-log-item">' +
+                '<span class="alert-log-time">' + a.created_at + '</span>' +
+                '<span class="' + sevClass + '">' + a.severity.toUpperCase() + '</span>' +
+                '<span>' + a.maintenance_recommendation + '</span>' +
+                '</div>';
+        }).join('');
+    }
+
+    function showToast(alert) {
+        var container = document.getElementById('alert-toast-container');
+        var toast = document.createElement('div');
+        toast.className = 'alert-toast ' + severityClass(alert.severity);
+        toast.textContent = alert.severity.toUpperCase() + ': ' + alert.maintenance_recommendation;
+        container.appendChild(toast);
+        setTimeout(function () {
+            toast.remove();
+        }, 6000);
+    }
+
+    function maybeToastNewAlerts(alerts) {
+        alerts.forEach(function (a) {
+            if (!seenAlertIds.has(a.id)) {
+                seenAlertIds.add(a.id);
+                if (firstLoadDone) {
+                    showToast(a);
+                }
+            }
+        });
+        firstLoadDone = true;
+    }
+
+    function poll() {
+        fetch(FEED_URL, { credentials: 'same-origin' })
+            .then(function (resp) { return resp.json(); })
+            .then(function (data) {
+                renderChart(data.readings || []);
+                renderLatest(data.latest);
+                renderAlertLog(data.alerts || []);
+                maybeToastNewAlerts(data.alerts || []);
+            })
+            .catch(function () { /* silently retry on next tick */ });
+    }
+
+    poll();
+    setInterval(poll, POLL_INTERVAL_MS);
+})();
+</script>
+{% endblock %}

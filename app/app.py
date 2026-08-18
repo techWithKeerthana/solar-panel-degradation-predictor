@@ -75,9 +75,22 @@ def create_app(config_name='development'):
     except ImportError:
         pass  # Phase 4 not yet built; skip gracefully
 
+    # Live Monitoring blueprint (simulated real-time sensor feed)
+    from app.routes.realtime import realtime_bp
+    app.register_blueprint(realtime_bp)
+
     # Create database tables
     with app.app_context():
         db.create_all()
+
+    # Start the simulated sensor background job. Wrapped in try/except so a
+    # scheduler problem can never prevent the web app itself from starting;
+    # see app/utils/realtime_scheduler.py for the duplicate-start guards.
+    try:
+        from app.utils.realtime_scheduler import start_scheduler
+        start_scheduler(app)
+    except Exception as exc:
+        app.logger.warning(f'Sensor simulator scheduler did not start: {exc}')
     
     # Root route (redirect to dashboard or login based on auth state)
     @app.route('/')

@@ -37,6 +37,7 @@ class User(UserMixin, db.Model):
     # Relationships
     datasets = db.relationship('Dataset', backref='owner', lazy='dynamic', cascade='all, delete-orphan')
     predictions = db.relationship('PredictionResult', backref='owner', lazy='dynamic', cascade='all, delete-orphan')
+    sensor_readings = db.relationship('SensorReading', backref='owner', lazy='dynamic', cascade='all, delete-orphan')
     
     def __repr__(self):
         return f'<User {self.username}>'
@@ -108,6 +109,49 @@ class PredictionResult(db.Model):
         """Parse input_data JSON string back to dict."""
         return json.loads(self.input_data)
     
+    def set_input_data(self, data_dict):
+        """Store input data as JSON string."""
+        self.input_data = json.dumps(data_dict)
+
+
+class SensorReading(db.Model):
+    """
+    One simulated real-time sensor reading for a user's virtual panel.
+
+    Generated periodically by app/utils/sensor_simulator.py (see that module's
+    docstring for why this is simulated rather than real IoT hardware) and
+    scored through the same ml/predict.py inference path used everywhere else,
+    so it follows the identical input_data/severity pattern as PredictionResult.
+
+    is_read tracks whether this reading has been surfaced to the user yet, so
+    the navbar unread-alerts badge (app/routes/realtime.py) only counts rows
+    the user hasn't seen. Only warning/critical severity rows are treated as
+    "alerts" for badge/log purposes; 'ok' rows are still stored for the chart.
+    """
+    __tablename__ = 'sensor_readings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+
+    # Same JSON-string pattern as PredictionResult.input_data
+    input_data = db.Column(db.Text, nullable=False)
+
+    predicted_efficiency = db.Column(db.Float, nullable=False)
+
+    # From maintenance_rules.get_maintenance_recommendation() — never redefined elsewhere
+    maintenance_recommendation = db.Column(db.Text, nullable=False)
+    severity = db.Column(db.String(20), nullable=False)  # 'critical' | 'warning' | 'ok'
+
+    is_read = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f'<SensorReading {self.id} (efficiency={self.predicted_efficiency:.4f}, severity={self.severity})>'
+
+    def get_input_data(self):
+        """Parse input_data JSON string back to dict."""
+        return json.loads(self.input_data)
+
     def set_input_data(self, data_dict):
         """Store input data as JSON string."""
         self.input_data = json.dumps(data_dict)
